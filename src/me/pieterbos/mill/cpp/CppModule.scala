@@ -1,10 +1,10 @@
 package me.pieterbos.mill.cpp
 
 import me.pieterbos.mill.cpp.options.implicits._
-import me.pieterbos.mill.cpp.options.{CppOptimization, CppOptions, CppOutput, CppStandard}
+import me.pieterbos.mill.cpp.options.{CppOptimization, CppOptions, CppStandard}
 import me.pieterbos.mill.cpp.toolchain.{CppToolchain, GccCompatible, Msvc}
 import mill.util.Util
-import mill.{Module, PathRef, T}
+import mill.{Command, Module, PathRef, T}
 
 import scala.collection.mutable.ArrayBuffer
 
@@ -24,16 +24,16 @@ trait CppModule extends Module {
   }
 
   def preferredWindowsToolchains: Seq[CppToolchain] = Seq(
-    Msvc("cl"),
-    GccCompatible("cc"),
-    GccCompatible("gcc"),
-    GccCompatible("clang"),
+    Msvc("cl", "lib"),
+    GccCompatible("cxx", "ar"),
+    GccCompatible("g++", "ar"),
+    GccCompatible("clang++", "ar"),
   )
 
   def preferredUnixToolchains: Seq[CppToolchain] = Seq(
-    GccCompatible("cc"),
-    GccCompatible("gcc"),
-    GccCompatible("clang"),
+    GccCompatible("cxx", "ar"),
+    GccCompatible("g++", "ar"),
+    GccCompatible("clang++", "ar"),
   )
 
   def windowsToolchain: CppToolchain =
@@ -98,13 +98,19 @@ trait CppModule extends Module {
     }
   }
 
-  def depAssemblies: T[Seq[PathRef]]= T { T.traverse(moduleDeps)(_.compile)() }
+  def depLinkStatic: T[Seq[PathRef]]= T { T.traverse(transitiveModuleDeps)(_.linkStatic)() }
 
-  def output: T[CppOutput] = T[CppOutput] { CppOutput.GenericObject("a") }
+  def name: T[String] = T { millSourcePath.baseName }
 
-  def link: T[PathRef] = T {
-    PathRef(toolchain.link((depAssemblies() ++ compileOnly()).map(_.path), T.dest, output(), options(), additionalOptions()))
+  def linkStatic: T[PathRef] = T {
+    PathRef(toolchain.linkStatic(compileOnly().map(_.path), T.dest, name(), options(), additionalOptions()))
   }
 
-  def compile: T[PathRef] = T { link() }
+  def compile: T[PathRef] = T {
+    PathRef(toolchain.linkExecutable((compileOnly() ++ depLinkStatic()).map(_.path), T.dest, name(), options(), additionalOptions()))
+  }
+
+  def run(args: String*): Command[Int] = T.command {
+    os.proc(compile().path, args).call().exitCode
+  }
 }

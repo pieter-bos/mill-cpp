@@ -1,11 +1,12 @@
 package me.pieterbos.mill.cpp.toolchain
 
-import me.pieterbos.mill.cpp.options.{CppOptimization, CppOptions, CppOutput, CppStandard}
+import me.pieterbos.mill.cpp.options.{CppOptimization, CppOptions, CppStandard}
 import os.{Path, Shellable}
 
-case class GccCompatible(path: Shellable) extends CppToolchain {
+case class GccCompatible(compilerPath: Shellable, arPath: Shellable) extends CppToolchain {
   override def isValid: Boolean =
-    os.proc(path, "--version").call().exitCode == 0
+    check(compilerPath, "--version") &&
+      check(arPath, "--version")
 
   private def cmdOptions(options: CppOptions): Seq[String] = {
     val CppOptions(includePaths, defines, includes, standard, optimization) = options
@@ -33,20 +34,19 @@ case class GccCompatible(path: Shellable) extends CppToolchain {
 
   override def compile(source: Path, outDir: Path, options: CppOptions, additionalOptions: Seq[String]): Path = {
     val out = outDir / (source.baseName + ".o")
-    os.proc(path, "-o", out, "-c", cmdOptions(options), additionalOptions, source).call().exitCode
+    os.proc(compilerPath, "-o", out, "-c", cmdOptions(options), additionalOptions, source).call()
     out
   }
 
-  override def link(objects: Seq[Path], outDir: Path, output: CppOutput, options: CppOptions, additionalOptions: Seq[String]): Path = {
-    val (outputFlags, name) = output match {
-      case CppOutput.GenericObject(name) => Seq("-r") -> (name + ".o")
-      case CppOutput.SharedLibrary(name) => Seq("-shared") -> (name + ".so")
-      case CppOutput.StaticLibrary(name) => Seq("-static") -> (name + ".a")
-      case CppOutput.Executable(name) => Nil -> name
-    }
+  override def linkStatic(objects: Seq[Path], outDir: Path, name: String, options: CppOptions, additionalOptions: Seq[String]): Path = {
+    val out = outDir / (name + ".a")
+    os.proc(arPath, "rs", out, objects).call()
+    out
+  }
 
+  override def linkExecutable(objects: Seq[Path], outDir: Path, name: String, options: CppOptions, additionalOptions: Seq[String]): Path = {
     val out = outDir / name
-    os.proc(path, "-v", outputFlags, "-o", out, cmdOptions(options), additionalOptions, objects).call().exitCode
+    os.proc(compilerPath, "-o", out, cmdOptions(options), objects, additionalOptions).call()
     out
   }
 }

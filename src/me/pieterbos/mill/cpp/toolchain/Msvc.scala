@@ -1,11 +1,12 @@
 package me.pieterbos.mill.cpp.toolchain
 
-import me.pieterbos.mill.cpp.options.{CppOptimization, CppOptions, CppOutput, CppStandard}
+import me.pieterbos.mill.cpp.options.{CppOptimization, CppOptions, CppStandard}
 import os.{Path, Shellable}
 
-case class Msvc(path: Shellable) extends CppToolchain {
+case class Msvc(clPath: Shellable, libPath: Shellable) extends CppToolchain {
   override def isValid: Boolean =
-    os.proc(path).call().exitCode == 0
+    check(clPath) &&
+      check(libPath)
 
   private def cmdOptions(options: CppOptions): Seq[String] = {
     val CppOptions(includePaths, defines, includes, standard, optimization) = options
@@ -33,20 +34,19 @@ case class Msvc(path: Shellable) extends CppToolchain {
 
   override def compile(source: Path, outDir: Path, options: CppOptions, additionalOptions: Seq[String]): Path = {
     val out = outDir / (source.baseName + ".obj")
-    os.proc(path, "/Fo", out, cmdOptions(options), additionalOptions, source).call().exitCode
+    os.proc(clPath, "/Fo", out, cmdOptions(options), additionalOptions, source).call()
     out
   }
 
-  override def link(objects: Seq[Path], outDir: Path, output: CppOutput, options: CppOptions, additionalOptions: Seq[String]): Path = {
-    val (outputFlags, name) = output match {
-      case CppOutput.GenericObject(name) => Seq("/Fo") -> (name + ".obj")
-      case CppOutput.SharedLibrary(name) => Seq("/Ld", "/Fe") -> (name + ".dll")
-      case CppOutput.StaticLibrary(name) => ???
-      case CppOutput.Executable(name) => Seq("/Fe") -> (name + ".exe")
-    }
+  override def linkStatic(objects: Seq[Path], outDir: Path, name: String, options: CppOptions, additionalOptions: Seq[String]): Path = {
+    val out = outDir / (name + ".lib")
+    os.proc(libPath, "/OUT", out, objects).call()
+    out
+  }
 
-    val out = outDir / name
-    os.proc(path, outputFlags, out, cmdOptions(options), additionalOptions, objects).call().exitCode
+  override def linkExecutable(objects: Seq[Path], outDir: Path, name: String, options: CppOptions, additionalOptions: Seq[String]): Path = {
+    val out = outDir / (name + ".exe")
+    os.proc(clPath, "/Fe", out, cmdOptions(options), additionalOptions, objects).call()
     out
   }
 }

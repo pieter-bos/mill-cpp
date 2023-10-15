@@ -7,5 +7,4 @@ object implicits {
 
   implicit val optimizationRw: RW[CppOptimization] = CppOptimization.rw
   implicit val standardRw: RW[CppStandard] = CppStandard.rw
-  implicit val outputRw: RW[CppOutput] = CppOutput.rw
 }
