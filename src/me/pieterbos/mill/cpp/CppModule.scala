@@ -1,27 +1,14 @@
 package me.pieterbos.mill.cpp
 
 import me.pieterbos.mill.cpp.options.implicits._
-import me.pieterbos.mill.cpp.options.{CppOptimization, CppOptions, CppStandard}
+import me.pieterbos.mill.cpp.options.{CppArchiveOptions, CppCompileOptions, CppExecutableOptions, CppOptimization, CppStandard}
 import me.pieterbos.mill.cpp.toolchain.{CppToolchain, GccCompatible, Msvc}
 import mill.util.Util
-import mill.{Command, Module, PathRef, T}
+import mill.{Command, PathRef, T}
 
-import scala.collection.mutable.ArrayBuffer
-
-trait CppModule extends Module {
-  def moduleDeps: Seq[CppModule] = Nil
-
-  private def collectModuleDeps(acc: ArrayBuffer[CppModule]): Unit =
-    if(!acc.contains(this)) {
-      acc += this
-      moduleDeps.foreach(_.collectModuleDeps(acc))
-    }
-
-  def transitiveModuleDeps: Seq[CppModule] = {
-    val acc = ArrayBuffer[CppModule]()
-    moduleDeps.foreach(_.collectModuleDeps(acc))
-    acc.toSeq.distinct
-  }
+trait CppModule extends LinkableModule {
+  override def moduleDeps: Seq[LinkableModule] = Nil
+  override def systemLibraryDeps: T[Seq[String]] = T { Seq.empty[String] }
 
   def preferredWindowsToolchains: Seq[CppToolchain] = Seq(
     Msvc("cl", "lib"),
@@ -52,9 +39,9 @@ trait CppModule extends Module {
   def generatedSources: T[Seq[PathRef]] = T { Seq.empty[PathRef] }
   def generatedIncludePaths: T[Seq[PathRef]] = T { Seq.empty[PathRef] }
 
-  def exportIncludePaths: T[Seq[PathRef]] = T { includePaths() ++ generatedIncludePaths() }
+  override def exportIncludePaths: T[Seq[PathRef]] = T { includePaths() ++ generatedIncludePaths() }
 
-  def depIncludePaths: T[Seq[PathRef]] = T { T.traverse(transitiveModuleDeps)(_.exportIncludePaths)().flatten }
+  def depIncludePaths: T[Seq[PathRef]] = T { T.traverse(moduleDeps)(_.exportIncludePaths)().flatten }
 
   def allSources: T[Seq[PathRef]] = T { sources() ++ generatedSources() }
   def allIncludePaths: T[Seq[PathRef]] = T { includePaths() ++ generatedIncludePaths() ++ depIncludePaths() }
@@ -80,34 +67,58 @@ trait CppModule extends Module {
 
   def includes: T[Seq[PathRef]] = T { Seq.empty[PathRef] }
 
-  private def options: T[CppOptions] = T {
-    CppOptions(
+  def compileOptions: T[Seq[String]] = T { Seq.empty[String] }
+  def compileEarlyOptions: T[Seq[String]] = T { Seq.empty[String] }
+  def archiveOptions: T[Seq[String]] = T { Seq.empty[String] }
+  def archiveEarlyOptions: T[Seq[String]] = T { Seq.empty[String] }
+
+  private def compileOptionsObj: T[CppCompileOptions] = T {
+    CppCompileOptions(
       allIncludePaths().map(_.path),
       defines(),
       includes().map(_.path),
       standard(),
-      optimization()
+      optimization(),
+      compileOptions(),
+      compileEarlyOptions(),
     )
   }
 
-  def additionalOptions: T[Seq[String]] = T { Seq.empty[String] }
+  private def archiveOptionsObj: T[CppArchiveOptions] = T {
+    CppArchiveOptions(
+
+    )
+  }
 
   def compileOnly: T[Seq[PathRef]] = T.persistent {
     for(source <- allSourceFiles()) yield {
-      PathRef(toolchain.compile(source.path, T.dest, options(), additionalOptions()))
+      PathRef(toolchain.compile(source.path, T.dest, compileOptionsObj()))
     }
   }
 
-  def depLinkStatic: T[Seq[PathRef]]= T { T.traverse(transitiveModuleDeps)(_.linkStatic)() }
-
   def name: T[String] = T { millSourcePath.baseName }
 
-  def linkStatic: T[PathRef] = T {
-    PathRef(toolchain.linkStatic(compileOnly().map(_.path), T.dest, name(), options(), additionalOptions()))
+  def archive: T[PathRef] = T {
+    PathRef(toolchain.archive(compileOnly().map(_.path), T.dest, name(), archiveOptionsObj()))
+  }
+
+  override def staticObjects: T[Seq[PathRef]] = T { Seq(archive()) }
+
+  override def dynamicObjects: T[Seq[PathRef]] = T { Seq.empty[PathRef] }
+}
+
+trait CppExecutableModule extends CppModule {
+  def executableOptions: T[CppExecutableOptions] = T {
+    CppExecutableOptions(
+      transitiveDynamicObjects().map(_.path),
+      transitiveSystemLibraryDeps(),
+      Nil,
+      Nil,
+    )
   }
 
   def compile: T[PathRef] = T {
-    PathRef(toolchain.linkExecutable((compileOnly() ++ depLinkStatic()).map(_.path), T.dest, name(), options(), additionalOptions()))
+    PathRef(toolchain.linkExecutable((compileOnly() ++ transitiveStaticObjects()).map(_.path), T.dest, name(), executableOptions()))
   }
 
   def run(args: String*): Command[Int] = T.command {

@@ -3,12 +3,12 @@ package me.pieterbos.mill.cpp
 import mill._
 import cmake.implicits._
 import mill.api.Ctx
+import mill.api.Result
 
-trait CMakeModule extends LinkableModule {
-  final override def moduleDeps: Seq[LinkableModule] = Nil
+import scala.collection.mutable.ArrayBuffer
 
+trait CMakeModule extends Module {
   def root: T[PathRef]
-  def targets: T[Seq[String]]
 
   def cMakeSetupBuild: T[os.Path] = T {
     val apiDir = T.dest / ".cmake" / "api" / "v1"
@@ -22,7 +22,7 @@ trait CMakeModule extends LinkableModule {
     PathRef(cMakeSetupBuild() / ".cmake" / "api" / "v1" / "reply")
   }
 
-  private def jobs: T[Int] = T {
+  def jobs: T[Int] = T {
     T.ctx() match {
       case ctx: Ctx.Jobs => ctx.jobs
       case _ => 1
@@ -52,38 +52,88 @@ trait CMakeModule extends LinkableModule {
     paths.map(p => upickle.default.read[cmake.Target](p.toIO, trace = true))
   }
 
-  def cMakeTargets: T[Seq[cmake.Target]] = T {
-    val targets = this.targets()
-    allCMakeTargets().filter(t => targets.contains(t.name))
+  trait CMakeLibrary extends LinkableModule {
+    final override def moduleDeps: Seq[LinkableModule] = Nil
+    def target: T[String]
+
+    def cMakeTarget: T[cmake.Target] = T {
+      allCMakeTargets().find(_.name == target()).get
+    }
+
+    def cMakeTargetAndDepsUnordered: T[Seq[cmake.Target]] = T {
+      val target = cMakeTarget()
+      val targets = allCMakeTargets()
+      target +: target.dependencies.map(dep => targets.find(_.id == dep.id).get)
+    }
+
+    def cMakeTargetAndDeps: T[Seq[cmake.Target]] = T {
+      /* The dependencies of a target are already the transitive closure of its dependencies, but they are not ordered
+       * in a defined way. The linker needs that static libraries do not occur earlier than other objects that need it,
+       * so we re-derive a proper order.
+       */
+      val pile = ArrayBuffer(cMakeTargetAndDepsUnordered(): _*)
+
+      def inner(): Result[Seq[cmake.Target]] = {
+        var result = Seq.empty[cmake.Target]
+
+        while(pile.nonEmpty) {
+          // find a dependency s.t.
+          pile.find { candidate =>
+            // there is no target that depends on it
+            !pile.exists(_.dependencies.exists(_.id == candidate.id))
+          } match {
+            case None => return Result.Failure("CMake configuration has cyclic dependencies")
+            case Some(target) =>
+              pile -= target
+              result :+= target
+          }
+        }
+
+        Result.Success(result)
+      }
+
+      inner()
+    }
+
+    override def systemLibraryDeps: T[Seq[String]] = T { Seq.empty[String] }
+
+    override def staticObjects: T[Seq[PathRef]] = T {
+      cMakeTargetAndDeps()
+        .filter(t => Seq("STATIC_LIBRARY", "OBJECT_LIBRARY").contains(t.`type`))
+        .flatMap(_.artifacts)
+        .map(p => PathRef(cMakeBuild().path / os.RelPath(p.path)))
+    }
+
+    override def dynamicObjects: T[Seq[PathRef]] = T {
+      cMakeTargetAndDeps()
+        .filter(t => Seq("SHARED_LIBRARY").contains(t.`type`))
+        .flatMap(_.artifacts)
+        .map(p => PathRef(cMakeBuild().path / os.RelPath(p.path)))
+    }
+
+    override def exportIncludePaths: T[Seq[PathRef]] = T {
+      /* TODO: this is most likely the include paths available to the compilation of the targets, and not in any sense
+               the "export" of the target. There's a good chance the exports are included there. */
+      cMakeTarget()
+        .compileGroups
+        .flatMap(_.includes)
+        .map(p => PathRef(os.Path(p.path)))
+    }
   }
 
-  def cMakeTargetsAndDeps: T[Seq[cmake.Target]] = T {
-    val targets = allCMakeTargets()
-    cMakeTargets().flatMap(t => t +: t.dependencies.map(dep => targets.find(_.id == dep.id).get)).distinctBy(_.id)
-  }
+  trait CMakeExecutable extends Module {
+    def target: T[String]
 
-  override def systemLibraryDeps: T[Seq[String]] = T { Seq.empty[String] }
+    def cMakeTarget: T[cmake.Target] = T {
+      allCMakeTargets().find(_.name == target()).get
+    }
 
-  override def staticObjects: T[Seq[PathRef]] = T {
-    cMakeTargetsAndDeps()
-      .filter(t => Seq("STATIC_LIBRARY", "OBJECT_LIBRARY").contains(t.`type`))
-      .flatMap(_.artifacts)
-      .map(p => PathRef(cMakeBuild().path / os.RelPath(p.path)))
-  }
+    def executable: T[PathRef] = T {
+      PathRef(cMakeBuild().path / os.RelPath(cMakeTarget().artifacts.head.path))
+    }
 
-  override def dynamicObjects: T[Seq[PathRef]] = T {
-    cMakeTargetsAndDeps()
-      .filter(t => Seq("SHARED_LIBRARY").contains(t.`type`))
-      .flatMap(_.artifacts)
-      .map(p => PathRef(cMakeBuild().path / os.RelPath(p.path)))
-  }
-
-  override def headers: T[Seq[PathRef]] = T {
-    /* TODO: this is most likely the include paths available to the compilation of the targets, and not in any sense
-             the "export" of the target. There's a good chance the exports are included there. */
-    cMakeTargets()
-      .flatMap(_.compileGroups)
-      .flatMap(_.includes)
-      .map(p => PathRef(os.Path(p.path)))
+    def run(args: String*): Command[Int] = T.command {
+      os.proc(executable().path, args).call(check = false).exitCode
+    }
   }
 }

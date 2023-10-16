@@ -1,6 +1,6 @@
 package me.pieterbos.mill.cpp.toolchain
 
-import me.pieterbos.mill.cpp.options.CppOptions
+import me.pieterbos.mill.cpp.options.{CppArchiveOptions, CppCompileOptions, CppExecutableOptions}
 import os.{Path, Shellable}
 
 import java.io.IOException
@@ -15,9 +15,9 @@ trait CppToolchain {
       case _: IOException => false
     }
 
-  def compile(source: Path, outDir: Path, options: CppOptions, additionalOptions: Seq[String]): Path
+  def compile(source: Path, outDir: Path, options: CppCompileOptions): Path
 
-  def linkStatic(objects: Seq[Path], outDir: Path, name: String, options: CppOptions, additionalOptions: Seq[String]): Path
+  def archive(objects: Seq[Path], outDir: Path, name: String, options: CppArchiveOptions): Path
 
-  def linkExecutable(objects: Seq[Path], outDir: Path, name: String, options: CppOptions, additionalOptions: Seq[String]): Path
+  def linkExecutable(objects: Seq[Path], outDir: Path, name: String, options: CppExecutableOptions): Path
 }
