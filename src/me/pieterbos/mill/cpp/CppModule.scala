@@ -11,7 +11,6 @@ trait CppModule extends LinkableModule {
   override def systemLibraryDeps: T[Seq[String]] = T { Seq.empty[String] }
 
   def preferredWindowsToolchains: Seq[CppToolchain] = Seq(
-    Msvc("cl", "lib"),
     GccCompatible("cxx", "ar"),
     GccCompatible("g++", "ar"),
     GccCompatible("clang++", "ar"),
