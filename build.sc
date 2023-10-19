@@ -3,9 +3,17 @@ import scalalib._
 import publish._
 
 object main extends RootModule with ScalaModule with PublishModule {
-  def scalaVersion = "2.13.12"
-  def publishVersion = "0.0.1"
-  def artifactName = T { "me.pieterbos.mill.cpp" }
+  def scalaMajor = T { "2.13" }
+  def scalaMinor = T { "12" }
+  def scalaVersion = T { s"${scalaMajor()}.${scalaMinor()}" }
+
+  def millMajor = T { "0.11" }
+  def millMinor = T { "0" }
+  def millVersion = T { s"${millMajor()}.${millMinor()}" }
+
+  def publishVersion = T { "0.0.1" }
+  def artifactName = T { "mill-cpp" }
+  def artifactSuffix = T { s"_mill${millMajor()}_${scalaMajor()}" }
 
   def pomSettings = PomSettings(
     description = "",
@@ -19,7 +27,7 @@ object main extends RootModule with ScalaModule with PublishModule {
   )
 
   def ivyDeps = Agg(
-    ivy"com.lihaoyi::mill-main-api:0.11.0",
-    ivy"com.lihaoyi::mill-main:0.11.0",
+    ivy"com.lihaoyi::mill-main-api:${millVersion()}",
+    ivy"com.lihaoyi::mill-main:${millVersion()}",
   )
 }
