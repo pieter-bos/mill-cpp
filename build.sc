@@ -65,7 +65,7 @@ object main extends RootModule with ScalaModule with PublishModule {
     def gpgSigned(file: os.Path, args: Seq[String]): os.Path = call("gpgSigned", file, args)
   }
 
-  def publishSonatypeCentralZip: T[PathRef] = T {
+  def publishSonatypeCentralTar: T[PathRef] = T {
     val pom = pomSettings()
     val componentDir = T.dest / "component"
     val namespaceDir = pom.organization.split('.').foldLeft(componentDir)(_ / _)
@@ -88,7 +88,7 @@ object main extends RootModule with ScalaModule with PublishModule {
       os.list(componentDir)
         .map(_.relativeTo(componentDir))
 
-    val out = T.dest / "component.zip"
+    val out = T.dest / "component.tar.gz"
 
     os.proc("tar", "--create", "--file", out, "--directory=" + componentDir.toString(), toArchive).call(cwd = T.dest)
 
@@ -98,7 +98,7 @@ object main extends RootModule with ScalaModule with PublishModule {
   def publishSonatypeCentral(): Command[Unit] = T.command {
     requireGitVersionTag()
     T.log.info(s"Deployment name: ${artifactId()}")
-    T.log.info(s"Upload file: ${publishSonatypeCentralZip().path}")
+    T.log.info(s"Upload file: ${publishSonatypeCentralTar().path}")
     ()
   }
 }
